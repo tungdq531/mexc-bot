@@ -239,36 +239,48 @@ def process_callback(chat_id, data):
     elif data == "back_alerts":
         send_message(chat_id, "🔔 <b>DANH SÁCH CẢNH BÁO</b>", get_main_keyboard())
 
-# ==================== KIỂM TRA CẢNH BÁO ====================
+# ==================== KIỂM TRA CẢNH BÁO (VĨNH VIỄN) ====================
 def alert_worker():
+    """Kiểm tra cảnh báo - Cảnh báo tồn tại vĩnh viễn, không tự hủy"""
     while True:
         try:
             now = datetime.now()
             for chat_id, user in user_data.items():
-                to_remove = []
-                for aid, alert in user['alerts'].items():
-                    if now - alert['created_at'] > timedelta(minutes=alert['minutes']):
-                        to_remove.append(aid)
-                        continue
-                    current = get_price(alert['symbol'])
-                    if current:
-                        change = abs((current - alert['base_price']) / alert['base_price']) * 100
-                        if change >= alert['percent']:
-                            direction = "📈 TĂNG" if current > alert['base_price'] else "📉 GIẢM"
-                            msg = (
-                                f"🚨 <b>CẢNH BÁO GIÁ</b>\n\n"
-                                f"📊 <b>{alert['symbol']}</b>\n"
-                                f"{direction} <b>{change:.2f}%</b> (ngưỡng {alert['percent']}%)\n\n"
-                                f"💰 {alert['base_price']:,.5f} → {current:,.5f} USDT"
-                            )
-                            send_message(chat_id, msg)
-                            to_remove.append(aid)
-                for aid in to_remove:
-                    if aid in user['alerts']:
-                        del user['alerts'][aid]
+                for aid, alert in list(user['alerts'].items()):
+                    # Lấy thời gian lần cuối kiểm tra (hoặc thời gian tạo)
+                    last_check = alert.get('last_check_time', alert['created_at'])
+                    check_interval = alert['minutes']  # phút
+                    
+                    # Nếu đã đủ thời gian kể từ lần kiểm tra cuối
+                    if (now - last_check).total_seconds() >= check_interval * 60:
+                        # Lấy giá hiện tại
+                        current = get_price(alert['symbol'])
+                        if current:
+                            # Lấy giá mốc (giá lần kiểm tra trước)
+                            last_price = alert.get('last_price', alert['base_price'])
+                            change = abs((current - last_price) / last_price) * 100
+                            
+                            if change >= alert['percent']:
+                                direction = "📈 TĂNG" if current > last_price else "📉 GIẢM"
+                                msg = (
+                                    f"🚨 <b>CẢNH BÁO GIÁ</b>\n\n"
+                                    f"📊 <b>{alert['symbol']}</b>\n"
+                                    f"{direction} <b>{change:.2f}%</b> (ngưỡng {alert['percent']}%)\n\n"
+                                    f"💰 {last_price:,.5f} → {current:,.5f} USDT\n"
+                                    f"⏰ Trong {check_interval} phút"
+                                )
+                                send_message(chat_id, msg)
+                                
+                                # CẬP NHẬT MỐC MỚI (quan trọng để cảnh báo tiếp)
+                                alert['last_price'] = current
+                            
+                            # Cập nhật thời gian kiểm tra cuối
+                            alert['last_check_time'] = now
+                            user['alerts'][aid] = alert
+                            
         except Exception as e:
             print(f"Lỗi cảnh báo: {e}")
-        time.sleep(30)
+        time.sleep(30)  # Kiểm tra mỗi 30 giây
 
 # ==================== NHẬN TIN NHẮN ====================
 def main():

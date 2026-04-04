@@ -37,10 +37,10 @@ def send_message(chat_id, text, reply_markup=None):
 def get_main_keyboard():
     return {
         "keyboard": [
-            ["📊 Thêm coin", "📋 Danh sách coin"],
-            ["⚠️ Tạo cảnh báo", "🔔 Xem cảnh báo"],
-            ["❌ Xóa cảnh báo", "🔄 Reset dữ liệu"],
-            ["❓ Trợ giúp"]
+            ["📊 Thêm coin", "❌ Xóa coin"],
+            ["📋 Danh sách coin", "⚠️ Tạo cảnh báo"],
+            ["🔔 Xem cảnh báo", "❌ Xóa cảnh báo"],
+            ["🔄 Reset dữ liệu", "❓ Trợ giúp"]
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False
@@ -53,21 +53,30 @@ def get_back_keyboard():
         "one_time_keyboard": False
     }
 
-def get_alert_actions_keyboard(alert_id):
+def get_coin_list_keyboard(coins):
+    """Tạo bàn phím danh sách coin để chọn xóa"""
+    keyboard = []
+    row = []
+    for i, symbol in enumerate(coins):
+        row.append({"text": f"❌ {symbol}", "callback_data": f"delcoin_{symbol}"})
+        if len(row) == 2:  # 2 nút mỗi hàng
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    keyboard.append([{"text": "🔙 Quay lại menu chính", "callback_data": "back_main"}])
     return {
-        "inline_keyboard": [
-            [{"text": "✅ Xóa cảnh báo", "callback_data": f"del_{alert_id}"}],
-            [{"text": "🔙 Quay lại", "callback_data": "back_alerts"}]
-        ]
+        "inline_keyboard": keyboard
     }
 
-# ==================== TẠO MENU LỆNH (GÓC DƯỚI BÊN TRÁI) ====================
+# ==================== TẠO MENU LỆNH ====================
 def set_bot_commands():
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/setMyCommands"
     commands = [
         {"command": "start", "description": "🚀 Khởi động bot"},
         {"command": "menu", "description": "📋 Hiển thị menu chính"},
         {"command": "add", "description": "➕ Thêm coin theo dõi"},
+        {"command": "remove_coin", "description": "❌ Xóa coin khỏi danh sách"},
         {"command": "list", "description": "📋 Xem danh sách coin"},
         {"command": "alert", "description": "⚠️ Tạo cảnh báo giá"},
         {"command": "alerts", "description": "🔔 Xem cảnh báo"},
@@ -94,10 +103,28 @@ def process_command(chat_id, text):
         send_message(chat_id, "📋 <b>MENU CHÍNH</b>\n\nChọn chức năng:", get_main_keyboard())
         return
     
+    # ===== THÊM COIN =====
     if text == "📊 Thêm coin" or text == "/add":
         send_message(chat_id, "💰 <b>THÊM COIN</b>\n\nVui lòng nhập mã coin:\n\n<i>Ví dụ: BTCUSDT, ETHUSDT</i>\n\nHoặc gõ /cancel để hủy.", get_back_keyboard())
         return
     
+    # ===== XÓA COIN =====
+    if text == "❌ Xóa coin" or text == "/remove_coin":
+        if not user['coins']:
+            send_message(chat_id, "📭 Chưa có coin nào để xóa.\n\nDùng nút '📊 Thêm coin' để thêm.", get_main_keyboard())
+            return
+        
+        # Gửi danh sách coin dạng nút bấm để chọn xóa
+        coins = list(user['coins'].keys())
+        msg = "❌ <b>CHỌN COIN CẦN XÓA</b>\n\n"
+        for i, symbol in enumerate(coins, 1):
+            msg += f"{i}. {symbol}\n"
+        msg += "\n👉 Click vào coin bên dưới để xóa."
+        
+        send_message(chat_id, msg, get_coin_list_keyboard(coins))
+        return
+    
+    # ===== DANH SÁCH COIN =====
     if text == "📋 Danh sách coin" or text == "/list":
         if not user['coins']:
             send_message(chat_id, "📭 Chưa có coin nào.\n\nDùng nút '📊 Thêm coin' để thêm.", get_main_keyboard())
@@ -114,25 +141,26 @@ def process_command(chat_id, text):
         send_message(chat_id, msg, get_main_keyboard())
         return
     
+    # ===== TẠO CẢNH BÁO =====
     if text == "⚠️ Tạo cảnh báo" or text == "/alert":
         send_message(chat_id, "⚠️ <b>TẠO CẢNH BÁO</b>\n\nVui lòng nhập theo cú pháp:\n\n<code>COIN % PHÚT</code>\n\n<i>Ví dụ: BTCUSDT 5 10</i>\n(Cảnh báo khi BTC biến động 5% trong 10 phút)\n\nHoặc gõ /cancel để hủy.", get_back_keyboard())
         return
     
+    # ===== XEM CẢNH BÁO =====
     if text == "🔔 Xem cảnh báo" or text == "/alerts":
         if not user['alerts']:
             send_message(chat_id, "🔔 Chưa có cảnh báo nào.\n\nDùng nút '⚠️ Tạo cảnh báo' để tạo.", get_main_keyboard())
             return
         msg = "🔔 <b>DANH SÁCH CẢNH BÁO</b>\n\n"
         for aid, alert in user['alerts'].items():
-            remaining = alert['minutes'] - (datetime.now() - alert['created_at']).total_seconds() / 60
             msg += f"🆔 <code>{aid}</code>\n"
             msg += f"📊 {alert['symbol']} | {alert['percent']}% / {alert['minutes']}p\n"
             msg += f"💰 {alert['base_price']:,.5f} USDT\n"
-            msg += f"⏰ Còn: {max(0, int(remaining))} phút\n"
             msg += "➖➖➖➖➖➖\n"
         send_message(chat_id, msg, get_main_keyboard())
         return
     
+    # ===== XÓA CẢNH BÁO =====
     if text == "❌ Xóa cảnh báo" or text == "/remove_alert":
         if not user['alerts']:
             send_message(chat_id, "📭 Không có cảnh báo nào để xóa.", get_main_keyboard())
@@ -144,18 +172,25 @@ def process_command(chat_id, text):
         send_message(chat_id, msg, get_back_keyboard())
         return
     
+    # ===== RESET =====
     if text == "🔄 Reset dữ liệu" or text == "/reset":
         user['coins'] = {}
         user['alerts'] = {}
         send_message(chat_id, "🔄 Đã reset toàn bộ dữ liệu!\n\nDùng nút '📊 Thêm coin' để bắt đầu.", get_main_keyboard())
         return
     
+    # ===== TRỢ GIÚP =====
     if text == "❓ Trợ giúp" or text == "/help":
         msg = (
             "❓ <b>HƯỚNG DẪN SỬ DỤNG</b>\n\n"
             "<b>📊 THÊM COIN</b>\n"
             "Click nút '📊 Thêm coin' hoặc gõ /add\n"
             "Nhập mã coin (VD: BTCUSDT, ETHUSDT)\n\n"
+            "<b>❌ XÓA COIN</b>\n"
+            "Click nút '❌ Xóa coin' hoặc gõ /remove_coin\n"
+            "Chọn coin cần xóa từ danh sách\n\n"
+            "<b>📋 DANH SÁCH COIN</b>\n"
+            "Click nút '📋 Danh sách coin' hoặc gõ /list\n\n"
             "<b>⚠️ TẠO CẢNH BÁO</b>\n"
             "Click nút '⚠️ Tạo cảnh báo' hoặc gõ /alert\n"
             "Nhập: COIN % PHÚT (VD: BTCUSDT 5 10)\n\n"
@@ -173,7 +208,10 @@ def process_command(chat_id, text):
     if text == "/start":
         send_message(chat_id, 
             "🤖 <b>CHÀO MỪNG BẠN ĐẾN VỚI BOT CẢNH BÁO GIÁ MEXC</b>\n\n"
-            "Bot giúp bạn theo dõi giá coin và nhận cảnh báo khi giá biến động.\n\n"
+            "Bot giúp bạn:\n"
+            "💰 Xem giá coin realtime\n"
+            "📊 Theo dõi danh sách coin yêu thích\n"
+            "⚠️ Nhận cảnh báo khi giá biến động\n\n"
             "Click nút bên dưới để bắt đầu!",
             get_main_keyboard())
         return
@@ -223,11 +261,22 @@ def process_command(chat_id, text):
     if text != "/cancel":
         send_message(chat_id, "❌ Lệnh không hợp lệ!\n\nVui lòng sử dụng menu bên dưới.", get_main_keyboard())
 
-# ==================== XỬ LÝ CALLBACK (NHẤN NÚT INLINE) ====================
+# ==================== XỬ LÝ CALLBACK ====================
 def process_callback(chat_id, data):
     if chat_id not in user_data:
         user_data[chat_id] = {'coins': {}, 'alerts': {}}
     
+    # Xóa coin
+    if data.startswith("delcoin_"):
+        symbol = data[8:]  # Lấy tên coin sau "delcoin_"
+        if symbol in user_data[chat_id]['coins']:
+            del user_data[chat_id]['coins'][symbol]
+            send_message(chat_id, f"✅ Đã xóa coin <b>{symbol}</b> khỏi danh sách theo dõi.", get_main_keyboard())
+        else:
+            send_message(chat_id, f"❌ Không tìm thấy coin <b>{symbol}</b>", get_main_keyboard())
+        return
+    
+    # Xóa cảnh báo
     if data.startswith("del_"):
         alert_id = data[4:]
         if alert_id in user_data[chat_id]['alerts']:
@@ -235,9 +284,15 @@ def process_callback(chat_id, data):
             send_message(chat_id, f"✅ Đã xóa cảnh báo <code>{alert_id}</code>", get_main_keyboard())
         else:
             send_message(chat_id, "❌ Cảnh báo không tồn tại hoặc đã được xóa.", get_main_keyboard())
+        return
     
-    elif data == "back_alerts":
+    if data == "back_main":
+        send_message(chat_id, "📋 <b>MENU CHÍNH</b>", get_main_keyboard())
+        return
+    
+    if data == "back_alerts":
         send_message(chat_id, "🔔 <b>DANH SÁCH CẢNH BÁO</b>", get_main_keyboard())
+        return
 
 # ==================== KIỂM TRA CẢNH BÁO (VĨNH VIỄN) ====================
 def alert_worker():
@@ -271,7 +326,7 @@ def alert_worker():
                                 )
                                 send_message(chat_id, msg)
                                 
-                                # CẬP NHẬT MỐC MỚI (quan trọng để cảnh báo tiếp)
+                                # CẬP NHẬT MỐC MỚI
                                 alert['last_price'] = current
                             
                             # Cập nhật thời gian kiểm tra cuối
@@ -280,7 +335,7 @@ def alert_worker():
                             
         except Exception as e:
             print(f"Lỗi cảnh báo: {e}")
-        time.sleep(30)  # Kiểm tra mỗi 30 giây
+        time.sleep(30)
 
 # ==================== NHẬN TIN NHẮN ====================
 def main():
@@ -294,6 +349,7 @@ def main():
     print("✅ Hỗ trợ nhiều người dùng")
     print("✅ Menu nút bấm bên dưới")
     print("✅ Hiển thị 5 số thập phân")
+    print("✅ Có chức năng xóa coin")
     
     last_id = 0
     while True:
